@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligent VPN Traffic Analysis Using Network-in-Network Architecture and Deep Neural Networks | Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-wrapper">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+          </svg>
+          <span>VPN Traffic Analysis</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-page="overview">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          <span>System Overview</span>
+        </button>
+        <button class="nav-item" data-page="livecapture">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+          <span>Live Capture</span>
+        </button>
+        <button class="nav-item" data-page="live">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6v6l4 2"/>
+          </svg>
+          <span>Traffic Classification</span>
+        </button>
+        <button class="nav-item" data-page="csv">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <span>CSV Upload</span>
+        </button>
+        <button class="nav-item" data-page="metrics">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+          <span>Metrics Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="anomaly">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span>Anomaly Detection</span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="topbar-title">Intelligent VPN Traffic Analysis Using Network-in-Network Architecture and Deep Neural Networks</h1>
+        <div class="topbar-right">
+          <span class="model-badge" id="modelBadge" title="Model status">--</span>
+          <span class="user-badge" id="userBadge"></span>
+          <button class="btn btn-secondary btn-sm" id="logoutBtn">Logout</button>
+          <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark mode">
+          <svg class="icon-sun" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <svg class="icon-moon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- 0. System Overview -->
+        <section class="page active" id="page-overview">
+          <div class="overview-header">
+            <h2 class="overview-title">System Overview</h2>
+            <p class="overview-subtitle">Data from ISCX dataset (ISCX_Data.csv).</p>
+          </div>
+          <div class="overview-cards">
+            <div class="overview-card">
+              <div class="overview-card-content">
+                <span class="overview-card-value" id="totalFlows">0</span>
+                <span class="overview-card-label">Total Flows Analyzed</span>
+              </div>
+              <div class="overview-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-card-content">
+                <span class="overview-card-value" id="vpnPercent">0%</span>
+                <span class="overview-card-label">VPN Traffic Detected</span>
+              </div>
+              <div class="overview-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-card-content">
+                <span class="overview-card-value" id="nonVpnPercent">0%</span>
+                <span class="overview-card-label">Non-VPN Traffic</span>
+              </div>
+              <div class="overview-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-card-content">
+                <span class="overview-card-value" id="criticalAnomalies">—</span>
+                <span class="overview-card-label">Critical Anomalies (run Anomaly Detection)</span>
+              </div>
+              <div class="overview-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+            </div>
+          </div>
+          <div class="overview-charts">
+            <div class="card overview-chart-card">
+              <h3>Network Flow Density</h3>
+              <div class="chart-container">
+                <canvas id="flowDensityChart" height="200"></canvas>
+              </div>
+            </div>
+            <div class="card overview-chart-card">
+              <h3>Network Traffic Distribution</h3>
+              <div class="chart-container">
+                <canvas id="trafficDistChart" height="200"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="card overview-chart-card full-width">
+            <h3>Traffic Type Analysis</h3>
+            <div class="chart-container">
+              <canvas id="trafficTypeChart" height="180"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- 1. Live Capture -->
+        <section class="page" id="page-livecapture">
+          <div class="live-capture-header">
+            <h2 class="overview-title">Live Network Capture</h2>
+            <div class="live-capture-controls">
+              <button class="btn btn-primary" id="liveCaptureStart">
+                <span class="btn-text">Start Stream</span>
+                <span class="btn-loading">Streaming...</span>
+              </button>
+              <button class="btn btn-secondary" id="liveCaptureStop" disabled>Stop</button>
+              <span class="live-capture-stats" id="liveCaptureStats">0 flows in stream</span>
+            </div>
+          </div>
+          <div class="card live-capture-stream">
+            <h3>Streaming Traffic</h3>
+            <div class="live-capture-list-header">
+              <span>Time</span>
+              <span>Src IP : Src Port → Dst IP : Dst Port</span>
+              <span></span>
+            </div>
+            <div class="live-capture-list" id="liveCaptureList"></div>
+          </div>
+          <div class="card live-capture-result" id="liveCaptureResultCard" hidden>
+            <h3>Classification Result</h3>
+            <div class="live-capture-result-content" id="liveCaptureResult"></div>
+          </div>
+        </section>
+
+        <!-- 2. Traffic Classification -->
+        <section class="page" id="page-live">
+          <div class="card">
+            <h2 class="card-title">Traffic Classification</h2>
+            <p class="card-desc">Load real sample or enter flow params, then classify.</p>
+            <form id="liveForm" class="live-form" novalidate>
+              <div class="form-row">
+                <label class="form-group">
+                  <span>Src Port</span>
+                  <input type="number" name="Src Port" placeholder="e.g. 57158" min="0" step="any" value="57158">
+                </label>
+                <label class="form-group">
+                  <span>Dst Port</span>
+                  <input type="number" name="Dst Port" placeholder="e.g. 443" min="0" step="any" value="443">
+                </label>
+                <label class="form-group">
+                  <span>Protocol</span>
+                  <input type="number" name="Protocol" placeholder="6 (TCP)" min="0" step="any" value="6">
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-group">
+                  <span>Flow Duration (ms)</span>
+                  <input type="number" name="Flow Duration" placeholder="e.g. 229000" min="0" step="any" value="229000">
+                </label>
+                <label class="form-group">
+                  <span>Total Fwd Packets</span>
+                  <input type="number" name="Total Fwd Packet" placeholder="e.g. 1" min="0" step="any" value="1">
+                </label>
+                <label class="form-group">
+                  <span>Total Bwd Packets</span>
+                  <input type="number" name="Total Bwd packets" placeholder="e.g. 1" min="0" step="any" value="1">
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-group">
+                  <span>Total Fwd Packet Length</span>
+                  <input type="number" name="Total Length of Fwd Packet" placeholder="0" min="0" step="any" value="0">
+                </label>
+                <label class="form-group">
+                  <span>Total Bwd Packet Length</span>
+                  <input type="number" name="Total Length of Bwd Packet" placeholder="0" min="0" step="any" value="0">
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-group">
+                  <span>Flow Bytes/s</span>
+                  <input type="number" name="Flow Bytes/s" placeholder="0" min="0" step="any" value="0">
+                </label>
+                <label class="form-group">
+                  <span>Flow Packets/s</span>
+                  <input type="number" name="Flow Packets/s" placeholder="0" min="0" step="any" value="0">
+                </label>
+                <label class="form-group">
+                  <span>Flow IAT Mean</span>
+                  <input type="number" name="Flow IAT Mean" placeholder="e.g. 8733" min="0" step="any" value="8733">
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn btn-primary" id="loadSampleBtn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Load Real Sample
+                </button>
+                <button type="submit" class="btn btn-secondary" id="classifyBtn">
+                <span class="btn-text">Classify Traffic</span>
+                <span class="btn-loading">
+                  <svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 11-6.22-8.56"/>
+                  </svg>
+                  Classifying...
+                </span>
+              </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card result-card" id="liveResultCard" hidden>
+            <h3 class="result-title">Result</h3>
+            <div class="model-results compact">
+              <div class="model-result"><span class="model-name">CNN</span><span class="result-badge" id="cnnBadge">--</span><span class="result-confidence" id="cnnConf">--</span></div>
+              <div class="model-result"><span class="model-name">LSTM</span><span class="result-badge" id="lstmBadge">--</span><span class="result-confidence" id="lstmConf">--</span></div>
+              <div class="model-result"><span class="model-name">NIN</span><span class="result-badge" id="ninBadge">--</span><span class="result-confidence" id="ninConf">--</span></div>
+            </div>
+            <div class="result-chart-wrapper">
+              <canvas id="liveChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. CSV Upload -->
+        <section class="page" id="page-csv">
+          <div class="card">
+            <h2 class="card-title">Bulk Classification</h2>
+            <p class="card-desc">Upload a CSV file with flow features. First 10 rows will be previewed below.</p>
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="csvInput" accept=".csv" hidden>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p>Drop CSV file here or click to browse</p>
+            </div>
+            <div class="preview-table-wrapper" id="previewTableWrapper" hidden>
+              <h4>Preview (first 10 rows)</h4>
+              <div class="table-scroll">
+                <table class="data-table" id="previewTable"></table>
+              </div>
+            </div>
+            <button class="btn btn-primary" id="runBulkBtn" disabled>
+              <span class="btn-text">Run Classification</span>
+              <span class="btn-loading">Processing...</span>
+            </button>
+          </div>
+          <div class="card" id="bulkResultCard" hidden>
+            <h3 class="result-title">Bulk Results</h3>
+            <div class="results-header">
+              <span id="bulkResultSummary"></span>
+              <button class="btn btn-secondary" id="downloadBtn">Download Result CSV</button>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table" id="bulkResultTable"></table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Metrics Dashboard -->
+        <section class="page" id="page-metrics">
+          <h2 class="section-title">Metrics</h2>
+          <div class="metrics-clean">
+            <div class="card metrics-table-card">
+              <h3>Performance Summary</h3>
+              <table class="metrics-table">
+                <thead>
+                  <tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>CNN</td><td id="cnnAccuracy">--</td><td id="cnnPrecision">--</td><td id="cnnRecall">--</td><td id="cnnF1">--</td></tr>
+                  <tr><td>LSTM</td><td id="lstmAccuracy">--</td><td id="lstmPrecision">--</td><td id="lstmRecall">--</td><td id="lstmF1">--</td></tr>
+                  <tr><td>NIN</td><td id="ninAccuracy">--</td><td id="ninPrecision">--</td><td id="ninRecall">--</td><td id="ninF1">--</td></tr>
+                </tbody>
+              </table>
+              <details class="cm-details">
+                <summary>Confusion matrices</summary>
+                <div class="cm-grid">
+                  <div class="cm-box"><span class="cm-label">CNN</span><div id="cnnConfusionMatrix"></div></div>
+                  <div class="cm-box"><span class="cm-label">LSTM</span><div id="lstmConfusionMatrix"></div></div>
+                  <div class="cm-box"><span class="cm-label">NIN</span><div id="ninConfusionMatrix"></div></div>
+                </div>
+              </details>
+            </div>
+            <div class="metrics-charts">
+              <div class="card chart-card">
+                <h3>Accuracy</h3>
+                <canvas id="comparisonChart" height="160"></canvas>
+              </div>
+              <div class="card chart-card">
+                <h3>Class Distribution</h3>
+                <canvas id="classChart" height="160"></canvas>
+              </div>
+            </div>
+            <div class="metrics-charts">
+              <div class="card chart-card">
+                <h3>Model Comparison (All Metrics)</h3>
+                <canvas id="metricsRadarChart" height="220"></canvas>
+              </div>
+              <div class="card chart-card">
+                <h3>Precision / Recall / F1</h3>
+                <canvas id="metricsBarChart" height="220"></canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Threat & Anomaly Detection -->
+        <section class="page" id="page-anomaly">
+          <div class="threat-header">
+            <div>
+              <h2 class="threat-title">
+                <span class="threat-icon" aria-hidden="true"></span>
+                Threat & Anomaly Detection
+              </h2>
+              <p class="threat-subtitle">Identifying zero-day threats and behavioral deviations in encrypted streams.</p>
+            </div>
+          </div>
+          <div class="threat-upload-card card" id="threatUploadCard">
+            <p class="card-desc">Upload a CSV to detect anomalous flows: low-confidence predictions or where models disagree.</p>
+            <div class="upload-zone" id="anomalyUploadZone">
+              <input type="file" id="anomalyCsvInput" accept=".csv" hidden>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p id="anomalyUploadText">Drop CSV file here or click to browse</p>
+              <p class="upload-zone-filename" id="anomalyFileName" hidden></p>
+            </div>
+            <button class="btn btn-primary" id="runAnomalyBtn" disabled>
+              <span class="btn-text">Detect Anomalies</span>
+              <span class="btn-loading">Analyzing...</span>
+            </button>
+          </div>
+          <div class="threat-dashboard" id="threatDashboard" hidden>
+            <div class="threat-cards-row">
+              <div class="card threat-card">
+                <h3>Global Threat Level</h3>
+                <div class="threat-gauge-wrapper">
+                  <div class="threat-gauge" id="threatGauge">
+                    <div class="threat-gauge-fill" id="threatGaugeFill"></div>
+                    <div class="threat-gauge-value" id="threatGaugeValue">0%</div>
+                    <div class="threat-gauge-label" id="threatGaugeLabel">NORMAL</div>
+                  </div>
+                </div>
+              </div>
+              <div class="card threat-card">
+                <h3>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  Anomaly Events Timeline
+                </h3>
+                <div class="chart-container">
+                  <canvas id="anomalyTimelineChart" height="180"></canvas>
+                </div>
+              </div>
+            </div>
+            <div class="card threat-anomalies-card">
+              <h3>Recent Critical Anomalies</h3>
+              <div class="anomaly-list" id="anomalyList"></div>
+              <div class="threat-actions">
+                <button class="btn btn-secondary" id="downloadAnomalyBtn">Download Anomalies CSV</button>
+                <button class="btn btn-secondary" id="newAnomalyBtn">Analyze new file</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="alert" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
