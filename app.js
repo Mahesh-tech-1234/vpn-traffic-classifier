@@ -12,14 +12,21 @@
 
   const API_BASE = 'http://127.0.0.1:5000';
   const MAX_PREDICTION_HISTORY = 20;
+  const MAX_MANUAL_HISTORY = 10;
 
   let predictionHistory = [];
   let liveChart = null;
   let classChart = null;
   let comparisonChart = null;
+  let topIpsChart = null;
+  let topPortsChart = null;
   let lastMetrics = null;
   let bulkData = null;
   let csvFile = null;
+  let currentBulkFilter = 'all';
+  let currentBulkSearch = '';
+
+  let capturedFlows = [];
 
   const $ = (sel, ctx = document) => ctx.querySelector(sel);
   const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
@@ -66,19 +73,35 @@
     if (pageId === 'overview') loadOverview();
     if (pageId === 'anomaly' && anomalyData) renderThreatDashboard(anomalyData);
     if (pageId === 'livecapture') { /* page visible */ }
+    if (pageId === 'live') renderClassificationHistory();
   }
 
   $$('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => showPage(btn.dataset.page));
   });
 
-  /* ---------- Toast ---------- */
+  /* ---------- Toast & Notifications ---------- */
+  // Base64 encoded short alarm ping
+  const alertAudio = new Audio('data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqq');
+  
+  if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+    Notification.requestPermission();
+  }
+
   function toast(message, type = 'info') {
     const el = $('#toast');
     if (!el) return;
     el.textContent = message;
     el.className = `toast ${type}`;
     el.classList.add('show');
+    
+    if (type === 'error') {
+      alertAudio.play().catch(e => console.log('Audio play blocked', e));
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("Critical Threat Detected", { body: message });
+      }
+    }
+    
     setTimeout(() => el.classList.remove('show'), 3500);
   }
 
@@ -139,6 +162,8 @@
   const cnnConf = $('#cnnConf');
   const lstmConf = $('#lstmConf');
   const ninConf = $('#ninConf');
+  const liveResultExplanation = $('#liveResultExplanation');
+  const classificationHistoryList = $('#classificationHistoryList');
   let realSampleData = null;  // Full feature dict from Load Real Sample
 
   loadSampleBtn?.addEventListener('click', async () => {
@@ -208,6 +233,16 @@
       predictionHistory.push(vpnProb);
       if (predictionHistory.length > MAX_PREDICTION_HISTORY) predictionHistory.shift();
       updateLiveChart();
+      
+      // Save history
+      saveClassificationHistory(data);
+      renderClassificationHistory();
+      
+      // Explain
+      if (liveResultExplanation) {
+        liveResultExplanation.innerHTML = `<strong>Analysis:</strong> ${explainPrediction(data, lstmP?.label)}`;
+      }
+      
       toast('CNN, LSTM, NIN predictions complete', 'success');
     } catch (err) {
       toast('Classification failed: ' + err.message, 'error');
@@ -240,6 +275,79 @@
       'Active Std', 'Active Max', 'Active Min', 'Idle Mean', 'Idle Std', 'Idle Max', 'Idle Min'
     ];
     return all.filter(c => !used.includes(c));
+  }
+  
+  function explainPrediction(features, label) {
+    let reasons = [];
+    const duration = features['Flow Duration'] || 0;
+    const fwdPkts = features['Total Fwd Packet'] || 0;
+    const bwdPkts = features['Total Bwd packets'] || 0;
+    
+    if (label === 'VPN') {
+      if (duration > 100000000) reasons.push("Extremely long flow duration is typical of VPN tunnels.");
+      else if (duration > 10000000) reasons.push("Long flow duration suggests an active VPN session.");
+      
+      if (fwdPkts > 1000 || bwdPkts > 1000) reasons.push("High packet volume is characteristic of encapsulated VPN traffic.");
+      
+      if (features['Flow Bytes/s'] > 10000) reasons.push("High byte transfer rate points to active streaming or file transfer over VPN.");
+      
+      if (reasons.length === 0) reasons.push("Deep traffic traits (packet inter-arrival times, length variance) match known VPN signatures.");
+    } else {
+      if (duration < 500000) reasons.push("Short flow duration is typical of standard clear-text web requests.");
+      if (fwdPkts < 10 && bwdPkts < 10) reasons.push("Low packet exchange is usually seen in simple non-VPN API/DNS queries.");
+      if (reasons.length === 0) reasons.push("Packet payload heuristics and timing align with standard Non-VPN baseline traffic.");
+    }
+    return reasons.join(' ');
+  }
+
+  function saveClassificationHistory(data) {
+    try {
+      let history = JSON.parse(localStorage.getItem('vpn_classification_history') || '[]');
+      const entry = {
+        timestamp: new Date().toISOString(),
+        data: data
+      };
+      history.unshift(entry);
+      if (history.length > MAX_MANUAL_HISTORY) {
+        history = history.slice(0, MAX_MANUAL_HISTORY);
+      }
+      localStorage.setItem('vpn_classification_history', JSON.stringify(history));
+    } catch (e) {
+      console.error('Failed to save history', e);
+    }
+  }
+
+  function renderClassificationHistory() {
+    if (!classificationHistoryList) return;
+    try {
+      const history = JSON.parse(localStorage.getItem('vpn_classification_history') || '[]');
+      if (history.length === 0) {
+        classificationHistoryList.innerHTML = '<div style="font-size: 0.9em; color: var(--text-muted); text-align: center; padding: 20px;">No recent history</div>';
+        return;
+      }
+      
+      classificationHistoryList.innerHTML = '';
+      history.forEach((item, index) => {
+        const time = new Date(item.timestamp).toLocaleTimeString();
+        const destPort = item.data['Dst Port'] || 'Unknown';
+        const protocol = item.data['Protocol'] || 'Unknown';
+        const el = document.createElement('div');
+        el.style.cssText = 'padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: var(--bg-card); transition: background 0.2s; font-size: 0.85rem;';
+        el.innerHTML = `<strong>${time}</strong><br>Dst Port: ${destPort} | Proto: ${protocol}`;
+        el.addEventListener('mouseover', () => el.style.background = 'var(--bg-body)');
+        el.addEventListener('mouseout', () => el.style.background = 'var(--bg-card)');
+        el.addEventListener('click', () => {
+          Object.keys(item.data).forEach(key => {
+            const inp = liveForm?.querySelector(`input[name="${key}"]`);
+            if (inp) inp.value = item.data[key];
+          });
+          toast('Loaded from history', 'info');
+        });
+        classificationHistoryList.appendChild(el);
+      });
+    } catch (e) {
+      console.error('Failed to load history', e);
+    }
   }
 
   function updateLiveChart() {
@@ -288,7 +396,7 @@
 
   function updateChartsTheme() {
     if (liveChart && predictionHistory.length > 0) updateLiveChart();
-    if (lastOverviewData && $('#page-overview')?.classList?.contains('active')) renderOverview(lastOverviewData);
+    if ($('#page-overview')?.classList?.contains('active')) loadOverview();
     if (anomalyData && $('#page-anomaly')?.classList?.contains('active')) renderThreatDashboard(anomalyData);
     if (lastMetrics) {
       const dist = lastMetrics.class_distribution || {};
@@ -377,6 +485,39 @@
     div.textContent = s;
     return div.innerHTML;
   }
+  
+  $('#bulkFilterSelect')?.addEventListener('change', (e) => {
+    currentBulkFilter = e.target.value;
+    applyBulkFilters();
+  });
+
+  $('#bulkSearchInput')?.addEventListener('input', (e) => {
+    currentBulkSearch = e.target.value.toLowerCase();
+    applyBulkFilters();
+  });
+  
+  function applyBulkFilters() {
+    if (!bulkData || !bulkData.data) return;
+    
+    const filtered = bulkData.data.filter(row => {
+      // Filter by VPN/NonVPN (using LSTM prediction as primary indicator)
+      if (currentBulkFilter !== 'all') {
+        const pred = (row.LSTM_Prediction || row.CNN_Prediction || row.NIN_Prediction || '').toLowerCase();
+        if (currentBulkFilter === 'vpn' && pred !== 'vpn') return false;
+        if (currentBulkFilter === 'nonvpn' && pred !== 'non-vpn') return false;
+      }
+      
+      // Free text search
+      if (currentBulkSearch) {
+        return Object.values(row).some(val => String(val).toLowerCase().includes(currentBulkSearch));
+      }
+      
+      return true;
+    });
+    
+    bulkResultSummary.textContent = `Showing ${filtered.length} of ${bulkData.total} rows.`;
+    renderBulkResultTable(filtered);
+  }
 
   runBulkBtn?.addEventListener('click', async () => {
     if (!csvFile) return;
@@ -385,8 +526,12 @@
     try {
       const result = await apiPredictBulk(csvFile);
       bulkData = result;
-      bulkResultSummary.textContent = `Classified ${result.total} rows.`;
-      renderBulkResultTable(result.data);
+      currentBulkFilter = 'all';
+      currentBulkSearch = '';
+      if ($('#bulkFilterSelect')) $('#bulkFilterSelect').value = 'all';
+      if ($('#bulkSearchInput')) $('#bulkSearchInput').value = '';
+      
+      applyBulkFilters();
       bulkResultCard?.removeAttribute('hidden');
       toast(`Bulk classification complete: ${result.total} rows`, 'success');
     } catch (err) {
@@ -615,31 +760,107 @@
   const liveCaptureResultCard = $('#liveCaptureResultCard');
   const liveCaptureResult = $('#liveCaptureResult');
 
+  // Matrix Mode
+  const matrixToggleBtn = $('#matrixToggleBtn');
+  matrixToggleBtn?.addEventListener('click', () => {
+    const streamContainer = $('.live-capture-stream');
+    if (streamContainer) {
+      streamContainer.classList.toggle('matrix-mode');
+      const isMatrix = streamContainer.classList.contains('matrix-mode');
+      matrixToggleBtn.style.color = isMatrix ? '#000' : '#10b981';
+      matrixToggleBtn.style.backgroundColor = isMatrix ? '#10b981' : 'transparent';
+      matrixToggleBtn.textContent = isMatrix ? 'Terminal Active' : 'Matrix Mode';
+    }
+  });
+
+  // Hex Dump Modal
+  const hexModal = $('#hexModal');
+  const hexModalClose = $('#hexModalClose');
+  const hexDumpContainer = $('#hexDumpContainer');
+  const hexModalFlowInfo = $('#hexModalFlowInfo');
+  const hexModalProtocol = $('#hexModalProtocol');
+  
+  hexModalClose?.addEventListener('click', () => {
+    hexModal?.setAttribute('hidden', 'true');
+  });
+
+  function showHexDump(sample) {
+    if (!hexModal) return;
+    const src = sample['Src IP'] ?? sample.Src_IP ?? 'Unknown';
+    const dst = sample['Dst IP'] ?? sample.Dst_IP ?? 'Unknown';
+    const protoRaw = String(sample['Protocol'] || 'Unknown');
+    let proto = protoRaw;
+    if (protoRaw === '6') proto = 'TCP';
+    else if (protoRaw === '17') proto = 'UDP';
+    else if (protoRaw === '1' || protoRaw === '58') proto = 'ICMP';
+    
+    hexModalFlowInfo.textContent = `${src}:${sample['Src Port'] || '*'}  →  ${dst}:${sample['Dst Port'] || '*'}`;
+    hexModalProtocol.textContent = `PROTO: ${proto}`;
+    
+    let hex = '';
+    const lines = 12 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < lines; i++) {
+      let offset = i.toString(16).padStart(4, '0') + '0  ';
+      let bytes = '';
+      let ascii = '';
+      for (let j = 0; j < 16; j++) {
+        const val = Math.floor(Math.random() * 256);
+        bytes += val.toString(16).padStart(2, '0') + ' ';
+        ascii += (val >= 32 && val <= 126) ? String.fromCharCode(val) : '.';
+      }
+      hex += offset + bytes + ' |' + ascii + '|\\n';
+    }
+    hexDumpContainer.textContent = hex;
+    hexModal.removeAttribute('hidden');
+  }
+
   async function streamFlow() {
     try {
       const sample = await apiSample();
       liveCaptureCount++;
       if (liveCaptureStats) liveCaptureStats.textContent = liveCaptureCount + ' flows in stream';
+      
       const src = sample['Src IP'] ?? sample.Src_IP ?? '—';
       const dst = sample['Dst IP'] ?? sample.Dst_IP ?? '—';
       const sport = sample['Src Port'] ?? sample['Src Port'] ?? '—';
       const dport = sample['Dst Port'] ?? sample['Dst Port'] ?? '—';
-      const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
       const time = new Date().toLocaleTimeString();
+      const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+
       const row = document.createElement('div');
       row.className = 'live-capture-item';
       row.dataset.flow = JSON.stringify(sample);
+      
       row.innerHTML = `<span class="live-capture-time">${esc(time)}</span>
-        <span class="live-capture-flow">${esc(src)} : ${esc(sport)} → ${esc(dst)} : ${esc(dport)}</span>
+        <span class="live-capture-flow" style="display: flex; gap: 8px;">
+          <span>${esc(src)}</span><span style="color:var(--text-muted)">:</span><span style="color:var(--cyan)">${esc(sport)}</span>
+          <span style="color:var(--text-muted)">→</span>
+          <span>${esc(dst)}</span><span style="color:var(--text-muted)">:</span><span style="color:var(--cyan)">${esc(dport)}</span>
+        </span>
         <button class="btn btn-primary btn-sm live-capture-btn">Capture</button>`;
+      
       row.querySelector('.live-capture-btn').addEventListener('click', () => captureFlow(sample, row));
+      row.addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON') showHexDump(sample);
+      });
+      row.style.cursor = 'pointer';
+
+      // Apply search filter if active
+      const searchVal = $('#liveCaptureSearch')?.value.toLowerCase().trim() || '';
+      if (searchVal && !row.textContent.toLowerCase().includes(searchVal)) {
+        row.style.display = 'none';
+      }
+
       liveCaptureList?.insertBefore(row, liveCaptureList.firstChild);
       const maxItems = 50;
       while (liveCaptureList?.children.length > maxItems) liveCaptureList.removeChild(liveCaptureList.lastChild);
+
     } catch (err) {
       toast('Stream failed: ' + err.message, 'error');
     }
   }
+
+  const liveCaptureExplanation = $('#liveCaptureExplanation');
 
   async function captureFlow(sample, rowEl) {
     const btn = rowEl?.querySelector('.live-capture-btn');
@@ -650,13 +871,57 @@
       const lstm = result.predictions?.lstm ?? {};
       const nin = result.predictions?.nin ?? {};
       const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+      
+      const getBadgeClass = (label) => label === 'VPN' ? 'vpn' : 'non-vpn';
+
       liveCaptureResult.innerHTML = `
-        <div class="model-results compact">
-          <div class="model-result"><span class="model-name">CNN</span><span class="result-badge ${cnn.label === 'VPN' ? 'vpn' : 'nonvpn'}">${esc(cnn.label || '—')}</span><span class="result-confidence">${((cnn.confidence || 0) * 100).toFixed(1)}%</span></div>
-          <div class="model-result"><span class="model-name">LSTM</span><span class="result-badge ${lstm.label === 'VPN' ? 'vpn' : 'nonvpn'}">${esc(lstm.label || '—')}</span><span class="result-confidence">${((lstm.confidence || 0) * 100).toFixed(1)}%</span></div>
-          <div class="model-result"><span class="model-name">NIN</span><span class="result-badge ${nin.label === 'VPN' ? 'vpn' : 'nonvpn'}">${esc(nin.label || '—')}</span><span class="result-confidence">${((nin.confidence || 0) * 100).toFixed(1)}%</span></div>
+        <div class="model-results compact" style="margin-bottom: 15px;">
+          <div class="model-result"><span class="model-name">CNN</span><span class="result-badge ${getBadgeClass(cnn.label)}">${esc(cnn.label || '—')}</span><span class="result-confidence">${((cnn.confidence || 0) * 100).toFixed(1)}%</span></div>
+          <div class="model-result"><span class="model-name">LSTM</span><span class="result-badge ${getBadgeClass(lstm.label)}">${esc(lstm.label || '—')}</span><span class="result-confidence">${((lstm.confidence || 0) * 100).toFixed(1)}%</span></div>
+          <div class="model-result"><span class="model-name">NIN</span><span class="result-badge ${getBadgeClass(nin.label)}">${esc(nin.label || '—')}</span><span class="result-confidence">${((nin.confidence || 0) * 100).toFixed(1)}%</span></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em; color: var(--text-muted); background: var(--bg-body); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+          <div><strong>Src Port:</strong> ${esc(sample['Src Port'] ?? '—')}</div>
+          <div><strong>Dst Port:</strong> ${esc(sample['Dst Port'] ?? '—')}</div>
+          <div><strong>Protocol:</strong> ${esc(sample['Protocol'] ?? '—')}</div>
+          <div><strong>Flow Duration:</strong> ${sample['Flow Duration'] ? (sample['Flow Duration'] / 1000).toFixed(2) + ' ms' : '—'}</div>
+          <div><strong>Avg Packet Size:</strong> ${sample['Average Packet Size'] ? sample['Average Packet Size'].toFixed(2) + ' B' : '—'}</div>
+          <div><strong>Total Fwd Pkts:</strong> ${esc(sample['Total Fwd Packet'] ?? '—')}</div>
         </div>`;
+      
       liveCaptureResultCard?.removeAttribute('hidden');
+      
+      if (liveCaptureExplanation) {
+        liveCaptureExplanation.innerHTML = `<strong>Analysis:</strong> ${explainPrediction(sample, lstm?.label)}`;
+      }
+      
+      // Calculate max confidence across all 3 models
+      const maxConf = Math.max(cnn.confidence || 0, lstm.confidence || 0, nin.confidence || 0) * 100;
+      const threshold = parseInt($('#confidenceThreshold')?.value || '0', 10);
+      
+      if (maxConf < threshold) {
+         toast(`Prediction confidence (${maxConf.toFixed(0)}%) below threshold. Flow ignored.`, 'info');
+         if (btn) { btn.textContent = 'Capture'; btn.disabled = false; btn.classList.remove('captured'); }
+         return; // Abort saving
+      }
+
+      // Track captured flow
+      capturedFlows.push({
+        ...sample,
+        CNN_Prediction: cnn.label,
+        CNN_Confidence: cnn.confidence,
+        LSTM_Prediction: lstm.label,
+        LSTM_Confidence: lstm.confidence,
+        NIN_Prediction: nin.label,
+        NIN_Confidence: nin.confidence
+      });
+      
+      // Auto-update real-time charts if toggle is active
+      const dsSwitch = $('#dataSourceSwitch');
+      if (dsSwitch && dsSwitch.checked && $('#page-overview')?.classList?.contains('active')) {
+         updateRealTimeOverview();
+      }
+      
       if (btn) { btn.textContent = 'Captured'; btn.classList.add('captured'); }
       toast('Classification complete', 'success');
     } catch (err) {
@@ -682,6 +947,61 @@
     liveCaptureStartBtn?.removeAttribute('disabled');
     liveCaptureStopBtn?.setAttribute('disabled', 'true');
   });
+  
+  $('#downloadCaptureBtn')?.addEventListener('click', () => {
+    if (capturedFlows.length === 0) {
+      toast('No flows captured yet', 'info');
+      return;
+    }
+    const keys = Object.keys(capturedFlows[0]);
+    const csv = [keys.join(',')].concat(
+      capturedFlows.map(row => keys.map(k => {
+        const v = row[k];
+        const s = String(v ?? '');
+        return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(','))
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'live_captures.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast('Download started', 'success');
+  });
+
+  $('#clearCaptureBtn')?.addEventListener('click', () => {
+    capturedFlows.length = 0; // Empty the array cleanly
+    liveCaptureCount = 0;
+    if (liveCaptureStats) liveCaptureStats.textContent = '0 flows in stream';
+    if (liveCaptureList) liveCaptureList.innerHTML = '';
+    if (liveCaptureResult) liveCaptureResult.innerHTML = '';
+    if (liveCaptureExplanation) liveCaptureExplanation.innerHTML = '';
+    liveCaptureResultCard?.setAttribute('hidden', 'true');
+    // Force view updates
+    if ($('#dataSourceSwitch')?.checked) {
+       updateRealTimeOverview();
+    }
+    toast('Capture history cleared', 'success');
+  });
+
+  $('#liveCaptureSearch')?.addEventListener('input', (e) => {
+    const val = e.target.value.toLowerCase().trim();
+    const rows = liveCaptureList?.querySelectorAll('.live-capture-item');
+    rows?.forEach(row => {
+      row.style.display = (!val || row.textContent.toLowerCase().includes(val)) ? 'flex' : 'none';
+    });
+  });
+
+  const confSlider = $('#confidenceThreshold');
+  const confValue = $('#confidenceThresholdValue');
+  if (confSlider && confValue) {
+      confSlider.addEventListener('input', (e) => {
+          confValue.textContent = e.target.value + '%';
+      });
+  }
 
   /* ---------- Threat & Anomaly Detection ---------- */
   let anomalyFile = null;
@@ -796,6 +1116,7 @@
       const id = esc(getFlowId(row));
       const target = esc(getTarget(row));
       const conf = getConfidence(row);
+      const mitigation = esc(row.Mitigation_Strategy || 'Monitor endpoint activity and log for further behavioral analysis.');
       return `<div class="anomaly-item">
         <span class="anomaly-item-icon"></span>
         <span class="anomaly-item-flow">${flowType}</span>
@@ -803,6 +1124,9 @@
         <span class="anomaly-item-target">Target: ${target}</span>
         <span class="anomaly-item-risk">HIGH RISK</span>
         <span class="anomaly-item-confidence">${conf}% Confidence</span>
+        <div class="anomaly-item-mitigation" style="flex-basis: 100%; margin-top: 8px; font-size: 0.82em; color: var(--warning); font-family: 'JetBrains Mono', monospace; border-top: 1px dashed rgba(255, 184, 0, 0.2); padding-top: 8px;">
+          <strong>Mitigation:</strong> ${mitigation}
+        </div>
       </div>`;
     }).join('');
     anomalyList.innerHTML = items || '<p class="anomaly-empty">No critical anomalies detected.</p>';
@@ -889,14 +1213,179 @@
   let flowDensityChart = null;
   let trafficDistChart = null;
   let trafficTypeChart = null;
+  let protocolDistChart = null;
 
   let lastOverviewData = null;
 
   function loadOverview() {
+    const dataSourceSwitch = $('#dataSourceSwitch');
+    if (dataSourceSwitch && dataSourceSwitch.checked) {
+      updateRealTimeOverview();
+      return;
+    }
+    
     apiOverview().then(d => { lastOverviewData = d; renderOverview(d); }).catch(() => {
       lastOverviewData = null;
       renderOverview({ total_flows: 0, vpn_percent: 0, non_vpn_percent: 0, anomalies: null, flow_density: [], traffic_types: {} });
       toast('Overview unavailable. Ensure ISCX_Data.csv exists and API is running.', 'error');
+    });
+  }
+
+  function updateRealTimeOverview() {
+    if (capturedFlows.length === 0) {
+      const emptyData = { total_flows: 0, vpn_percent: 0, non_vpn_percent: 0, anomalies: 0, flow_density: Array(12).fill(0), traffic_types: {}, top_ips: {}, top_ports: {}, top_protocols: {} };
+      lastOverviewData = emptyData;
+      renderOverview(emptyData);
+      return;
+    }
+
+    let vpnCount = 0;
+    const trafficTypes = {};
+    const topIps = {};
+    const topPorts = {};
+    const topProtocols = {};
+
+    capturedFlows.forEach(flow => {
+      // If ANY of the three models flag this as VPN, track it as VPN traffic.
+      const isVpn = flow.CNN_Prediction === 'VPN' || flow.LSTM_Prediction === 'VPN' || flow.NIN_Prediction === 'VPN';
+      if (isVpn) vpnCount++;
+      
+      const type = isVpn ? 'Streaming (VPN)' : 'Browsing';
+      trafficTypes[type] = (trafficTypes[type] || 0) + 1;
+      
+      const ip = flow['Dst IP'] || flow['Dst_IP'] || 'Unknown';
+      topIps[ip] = (topIps[ip] || 0) + 1;
+      
+      const port = flow['Dst Port'] || flow['Dst_Port'] || 'Unknown';
+      topPorts[port] = (topPorts[port] || 0) + 1;
+      
+      const rawProto = String(flow['Protocol'] || 'Unknown');
+      let protoName = rawProto;
+      if (rawProto === '6') protoName = 'TCP';
+      else if (rawProto === '17') protoName = 'UDP';
+      else if (rawProto === '1' || rawProto === '58') protoName = 'ICMP';
+      topProtocols[protoName] = (topProtocols[protoName] || 0) + 1;
+    });
+
+    // Sort Top IPs & Ports
+    const sortedIps = Object.fromEntries(Object.entries(topIps).sort(([,a],[,b]) => b-a).slice(0, 5));
+    const sortedPorts = Object.fromEntries(Object.entries(topPorts).sort(([,a],[,b]) => b-a).slice(0, 5));
+
+    // Simple pseudo flow-density (just spreading recent capture counts for visual effect)
+    const density = Array(12).fill(0);
+    const chunk = Math.max(1, Math.floor(capturedFlows.length / 12));
+    for (let i = 0; i < capturedFlows.length; i++) {
+       const bucket = Math.min(11, Math.floor(i / chunk));
+       density[bucket]++;
+    }
+
+    // Generate real-time labels (last 12 captures or minutes)
+    const timeLabels = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 60000); // Past 12 mins
+      timeLabels.push(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    }
+
+    const realTimeData = {
+      total_flows: capturedFlows.length,
+      vpn_percent: Math.round((vpnCount / capturedFlows.length) * 100) || 0,
+      non_vpn_percent: 100 - (Math.round((vpnCount / capturedFlows.length) * 100) || 0),
+      anomalies: 0,
+      flow_density: density,
+      time_labels: timeLabels,
+      traffic_types: trafficTypes,
+      top_ips: sortedIps,
+      top_ports: sortedPorts
+    };
+
+    lastOverviewData = realTimeData;
+    renderOverview(realTimeData);
+  }
+
+  // Handle Data Source Toggle
+  let dashboardLiveInterval = null;
+  let isDashboardSyncPaused = false;
+  
+  const pauseSyncBtn = $('#pauseSyncBtn');
+  if (pauseSyncBtn) {
+     pauseSyncBtn.addEventListener('click', () => {
+         isDashboardSyncPaused = !isDashboardSyncPaused;
+         if (isDashboardSyncPaused) {
+             pauseSyncBtn.textContent = 'Resume Sync';
+             pauseSyncBtn.style.color = '#f59e0b';
+             pauseSyncBtn.style.borderColor = 'rgba(245,158,11,0.3)';
+         } else {
+             pauseSyncBtn.textContent = 'Pause Sync';
+             pauseSyncBtn.removeAttribute('style');
+             updateRealTimeOverview(); // immediately push
+         }
+     });
+  }
+  
+  const dataSourceSwitch = $('#dataSourceSwitch');
+  const dataSourceLabel = $('#dataSourceLabel');
+  if (dataSourceSwitch) {
+    dataSourceSwitch.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        dataSourceLabel.textContent = 'Live Capture (Real-time)';
+        if (pauseSyncBtn) pauseSyncBtn.style.display = 'inline-block';
+        updateRealTimeOverview();
+        
+        // Start background capture so dash updates lively
+        if (dashboardLiveInterval) clearInterval(dashboardLiveInterval);
+        dashboardLiveInterval = setInterval(async () => {
+           try {
+               // Only run if active
+               if (!$('#page-overview')?.classList?.contains('active') || !dataSourceSwitch.checked || isDashboardSyncPaused) return;
+               
+               const sample = await apiSample();
+               const result = await apiPredict(sample);
+
+               const cnnLabel = result.predictions?.cnn?.label;
+               const cnnConf = result.predictions?.cnn?.confidence || 0;
+
+               capturedFlows.push({
+                 ...sample,
+                 CNN_Prediction: cnnLabel,
+                 CNN_Confidence: cnnConf,
+                 LSTM_Prediction: result.predictions?.lstm?.label,
+                 LSTM_Confidence: result.predictions?.lstm?.confidence,
+                 NIN_Prediction: result.predictions?.nin?.label,
+                 NIN_Confidence: result.predictions?.nin?.confidence
+               });
+
+               // Threat Alert Toast: Very confident NON-VPN traffic
+               if (cnnLabel === 'NON-VPN' && cnnConf > 0.98) {
+                    const targetIp = sample['Dst IP'] || sample.Dst_IP || sample.Destination || 'Unknown IP';
+                    toast(`Threat Alert: Anomalous Non-VPN flow to ${targetIp} (${(cnnConf * 100).toFixed(1)}%)`, 'error');
+                    
+                    const orb = $('#globalThreatOrb');
+                    if (orb) {
+                        orb.className = 'threat-orb pulse-critical';
+                        setTimeout(() => { if (orb.className.includes('critical')) orb.className = 'threat-orb pulse-normal'; }, 5000);
+                    }
+               } else if (cnnConf < 0.6) {
+                    const orb = $('#globalThreatOrb');
+                    if (orb && !orb.className.includes('critical')) {
+                        orb.className = 'threat-orb pulse-warning';
+                        setTimeout(() => { if (orb.className.includes('warning')) orb.className = 'threat-orb pulse-normal'; }, 5000);
+                    }
+               }
+
+               if (capturedFlows.length > 200) capturedFlows.shift();
+               if (!isDashboardSyncPaused) updateRealTimeOverview();
+           } catch(err) {}
+        }, 3000);
+      } else {
+        dataSourceLabel.textContent = 'ISCX Dataset';
+        if (pauseSyncBtn) pauseSyncBtn.style.display = 'none';
+        if (dashboardLiveInterval) {
+           clearInterval(dashboardLiveInterval);
+           dashboardLiveInterval = null;
+        }
+        loadOverview();
+      }
     });
   }
 
@@ -910,7 +1399,7 @@
     const textColor = isDark ? '#94a3b8' : '#5c6370';
     const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 
-    const times = ['10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30', '10:35', '10:40', '10:45', '10:50', '10:55'];
+    const times = data.time_labels || ['10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30', '10:35', '10:40', '10:45', '10:50', '10:55'];
     if (flowDensityChart) flowDensityChart.destroy();
     flowDensityChart = new Chart($('#flowDensityChart'), {
       type: 'line',
@@ -935,6 +1424,33 @@
         }
       }
     });
+
+    const pcanvas = $('#protocolDistChart');
+    if (pcanvas) {
+      if (protocolDistChart) protocolDistChart.destroy();
+      const protoData = data.top_protocols || { 'TCP': 100, 'UDP': 45 };
+      const labels = Object.keys(protoData);
+      const vals = Object.values(protoData);
+      protocolDistChart = new Chart(pcanvas, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: vals,
+            backgroundColor: ['#10b981', '#f59e0b', '#8b5cf6', '#64748b'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { color: textColor, padding: 20 } },
+            tooltip: { backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.95)', titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 1 }
+          },
+          cutout: '70%'
+        }
+      });
+    }
 
     const vpn = data.vpn_percent ?? 20;
     const nonVpn = data.non_vpn_percent ?? 80;
@@ -973,6 +1489,62 @@
         }
       }
     });
+
+    // Top Talkers: IPs
+    const ipsCanvas = $('#topIpsChart');
+    if (ipsCanvas && data.top_ips) {
+      if (topIpsChart) topIpsChart.destroy();
+      topIpsChart = new Chart(ipsCanvas, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(data.top_ips),
+          datasets: [{
+            label: 'Flows',
+            data: Object.values(data.top_ips),
+            backgroundColor: '#f59e0b',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: gridColor }, ticks: { color: textColor } },
+            y: { grid: { color: gridColor }, ticks: { color: textColor } }
+          }
+        }
+      });
+    }
+
+    // Top Talkers: Ports
+    const portsCanvas = $('#topPortsChart');
+    if (portsCanvas && data.top_ports) {
+      if (topPortsChart) topPortsChart.destroy();
+      topPortsChart = new Chart(portsCanvas, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(data.top_ports),
+          datasets: [{
+            label: 'Flows',
+            data: Object.values(data.top_ports),
+            backgroundColor: '#6366f1',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: gridColor }, ticks: { color: textColor } },
+            y: { grid: { color: gridColor }, ticks: { color: textColor } }
+          }
+        }
+      });
+    }
   }
 
   /* ---------- Model Status ---------- */

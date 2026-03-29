@@ -5,6 +5,8 @@ Endpoints: /predict, /predict-bulk, /metrics
 import os
 import io
 import json
+import socket
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify, send_from_directory
@@ -171,14 +173,54 @@ def status():
         return jsonify({"models": [], "loaded": False, "error": str(e)}), 500
 
 
+def get_local_ip():
+    """Attempt to resolve the host machine's Local Area Network IP."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Doesn't have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
+
 @app.route("/sample", methods=["GET"])
 def sample():
-    """Return a random real flow from ISCX dataset for live form."""
+    """Return a random real flow from ISCX dataset, spoofed to look live."""
     import random
     samples = _load_samples()
     if not samples:
         return jsonify({"error": "ISCX_Data.csv not found or has no valid flows"}), 404
-    row = random.choice(samples)
+        
+    row = random.choice(samples).copy()  # Use copy to avoid mutating cache
+    
+    # ---------------------------------------------------------
+    # LIVE MIMIC SPOOFING SYSTEM
+    # ---------------------------------------------------------
+    local_ip = get_local_ip()
+    
+    # About 50% of the time, the laptop is the Source (client pushing) vs Destination (receiving)
+    is_outbound = random.choice([True, False])
+    
+    if is_outbound:
+        row["Src IP"] = local_ip
+        # Give it a realistic dynamic outbound port from the OS ephemeral range
+        row["Src Port"] = random.randint(49152, 65535)
+        # Ensure a plausible external destination (to avoid looking like loopback)
+        if str(row.get("Dst IP", "")).startswith("192.168.") or str(row.get("Dst IP", "")).startswith("10."):
+             row["Dst IP"] = f"{random.randint(1,223)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+    else:
+        row["Dst IP"] = local_ip
+        row["Dst Port"] = random.randint(49152, 65535) # Usually the returning packet port bounds
+        if str(row.get("Src IP", "")).startswith("192.168.") or str(row.get("Src IP", "")).startswith("10."):
+             row["Src IP"] = f"{random.randint(1,223)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+             
+    # Overwrite the flow's old CSV timestamp with exactly right now.
+    row["Timestamp"] = datetime.now().strftime("%d/%m/%Y %I:%M:%S %p")
+             
     return jsonify(row)
 
 
@@ -314,6 +356,29 @@ def detect_anomalies():
                 row_data["NIN_Pred"] = nl
                 row_data["NIN_Conf"] = nc
                 row_data["Anomaly_Reason"] = "; ".join(reason)
+
+                # Generate a simple Mitigation Strategy based on heuristics
+                dst_port = row_data.get("Dst Port", 0)
+                flow_duration = row_data.get("Flow Duration", 0)
+                fwd_pkts = row_data.get("Total Fwd Packet", 0)
+
+                mitigation = []
+                if dst_port in [22, 3389, 21, 23, 445]:
+                    mitigation.append(f"Investigate high-risk port/service ({dst_port}). Block at firewall if unauthorized.")
+                
+                # Heuristics based on duration and volume for potential VPN/Tunnels
+                if flow_duration > 100000000 or fwd_pkts > 1000:
+                   mitigation.append("High volume/duration connection detected. Consider terminating the session or applying rate limiting (QoS).")
+                
+                # Check for significant model disagreement
+                if len(labels) == 3:
+                    mitigation.append("Models strongly disagree. Schedule manual Deep Packet Inspection (DPI) for this flow.")
+                
+                if not mitigation:
+                    mitigation.append("Monitor endpoint activity and log for further behavioral analysis.")
+
+                row_data["Mitigation_Strategy"] = " ".join(mitigation)
+                
                 anomalies.append(row_data)
 
         return jsonify({
@@ -394,6 +459,20 @@ def overview():
             flow_density = [len(df.iloc[i : i + chunk]) for i in range(0, len(df), chunk)][:12]
         flow_density = (flow_density + [0] * 12)[:12]
 
+        top_ips = {}
+        top_ports = {}
+        dst_ip_col = next((c for c in df.columns if c in ["Dst IP", "Dst_IP", "Destination IP", "Destination"]), None)
+        if dst_ip_col:
+            top_ips = df[dst_ip_col].value_counts().head(5).to_dict()
+            
+        dst_port_col = next((c for c in df.columns if c in ["Dst Port", "Dst_Port", "Destination Port"]), None)
+        if dst_port_col:
+            top_ports = df[dst_port_col].value_counts().head(5).to_dict()
+
+        # Convert int64/float64 to native int/float for JSON serialization
+        top_ips = {str(k): int(v) for k, v in top_ips.items()}
+        top_ports = {str(k): int(v) for k, v in top_ports.items()}
+
         result = {
             "total_flows": total,
             "vpn_percent": vpn_pct,
@@ -401,6 +480,8 @@ def overview():
             "anomalies": None,
             "flow_density": flow_density,
             "traffic_types": traffic_types,
+            "top_ips": top_ips,
+            "top_ports": top_ports
         }
         _overview_cache = result
         _overview_cache_mtime = mtime
