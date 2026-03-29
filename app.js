@@ -9,8 +9,7 @@
     window.location.href = '/login';
     return;
   }
-
-  const API_BASE = 'http://127.0.0.1:5000';
+  const API_BASE = window.location.origin;
   const MAX_PREDICTION_HISTORY = 20;
   const MAX_MANUAL_HISTORY = 10;
 
